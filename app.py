@@ -100,7 +100,8 @@ def load_data():
         files.extend(glob.glob(os.path.join("data", ext)))
     
     if not files:
-        return None, "No data file detected in 'data/' folder."
+        # BUG FIXED: Returning 3 values to match unpacking expectation in main()
+        return None, "No data file detected in 'data/' folder.", None
 
     file_path = files[0]
     
@@ -119,13 +120,13 @@ def load_data():
         # Date Handling
         date_col = next((c for c in df.columns if 'date' in c.lower()), None)
         if not date_col:
-            return None, "Critical: 'Date' column is missing."
+            return None, "Critical: 'Date' column is missing.", None
             
         df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
         df = df[df[date_col].dt.year == 2025]
         
         if df.empty:
-            return None, "No data records found for 2025."
+            return None, "No data records found for 2025.", None
 
         # Standardization
         if 'IF' in df.columns:
@@ -270,6 +271,7 @@ def main():
     
     if df is None:
         st.error(error_msg)
+        # Added explicit return to prevent further execution
         return
 
     # SIDEBAR
@@ -305,7 +307,7 @@ def main():
     if pi_col and sel_pi: mask &= df[pi_col].isin(sel_pi)
     
     # Date Filtering
-    if date_col and len(date_range) == 2:
+    if date_col and 'date_range' in locals() and len(date_range) == 2:
         mask &= (df[date_col].dt.date >= date_range[0]) & (df[date_col].dt.date <= date_range[1])
     
     df_filtered = df.loc[mask]
