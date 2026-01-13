@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Research Performance Dashboard 2025
 
 **System Status**: Production Ready | **Version**: 2.0 (Enterprise Edition)
@@ -114,3 +115,7 @@ streamlit run app.py
 ---
 
 **CONFIDENTIAL | INTERNAL USE ONLY**
+=======
+# Research_Dashboard
+Enterprise-grade analytics dashboard for tracking medical research KPIs, visualizing impact factors, and mapping co-authorship networks using Streamlit &amp; Plotly
+>>>>>>> 5a484b5fbea0667babc70209fdfa9df5f7594a8c
