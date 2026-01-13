@@ -8,6 +8,7 @@ from datetime import datetime
 from io import BytesIO
 import networkx as nx
 import itertools
+import re
 
 # -----------------------------------------------------------------------------
 # 1. ENTERPRISE CONFIGURATION
@@ -121,14 +122,13 @@ def load_data():
         
         # Date Handling
         date_col = next((c for c in df.columns if 'date' in c.lower()), None)
-        if not date_col:
-            return None, "Critical: 'Date' column is missing.", None
-            
-        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-        df = df[df[date_col].dt.year == 2025]
+        if date_col: 
+            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+        
+        # NOTE: Removed 2025 filter to ensure FULL DATA (32 papers) matches Customer Excel
         
         if df.empty:
-            return None, "No data records found for 2025.", None
+            return None, "No data records found.", None
 
         # Standardization
         if 'IF' in df.columns:
@@ -187,8 +187,10 @@ def plot_network_graph(df):
         
     G = nx.Graph()
     for authors_str in df['Authors'].dropna():
-        # Clean naming for graph
-        authors = [a.strip() for a in str(authors_str).replace(';',',').split(',') if len(a.strip()) > 3]
+        # Clean naming for graph uses same logic
+        cleaned_str = str(authors_str).replace(';',',').replace(' and ', ',').replace('.', '')
+        authors = [a.strip().title() for a in cleaned_str.split(',') if len(a.strip()) > 3]
+        
         if len(authors) > 1:
             for u, v in itertools.combinations(authors, 2):
                 if G.has_edge(u, v): G[u][v]['weight'] += 1
@@ -239,8 +241,8 @@ def main():
         if os.path.exists("assets/logo_left.png"): st.image("assets/logo_left.png", use_container_width=True)
     with c2:
         st.markdown("<h1 style='text-align: center; margin:0;'>RESEARCH PERFORMANCE DASHBOARD</h1>", unsafe_allow_html=True)
-        # CHANGED: Header Title per request
-        st.markdown("<h4 style='text-align: center; color: #666; margin:0; letter-spacing: 1px;'>KAESC Publications 2025</h4>", unsafe_allow_html=True)
+        # Updated Header
+        st.markdown("<h4 style='text-align: center; color: #666; margin:0; letter-spacing: 1px;'>KAESC Publications</h4>", unsafe_allow_html=True)
     with c3:
         if os.path.exists("assets/logo_right.png"): st.image("assets/logo_right.png", use_container_width=True)
             
@@ -272,19 +274,19 @@ def main():
     rank_opts = sorted(df['Journal.Ranking'].unique()) if 'Journal.Ranking' in df.columns else []
     sel_rank = st.sidebar.multiselect("Journal Ranking", rank_opts, default=rank_opts)
     
-    # IMPROVED AUTHOR FILTER:
-    # 1. Clean and split authors for the dropdown list to avoid messy strings.
+    # FIX: AGGRESSIVE AUTHOR MERGING
     auth_col = 'Authors' if 'Authors' in df.columns else None
     sel_auth = []
     if auth_col:
-        # Create a set of unique individual names
         unique_authors = set()
         for raw_str in df[auth_col].dropna().astype(str):
-            # Split by comma (and semicolon just in case)
-            parts = raw_str.replace(';',',').split(',')
+            # Split key: commas, semicolons, ' and '
+            # Normalize: title case, strip dots specific cleaning for "J." -> "J"
+            cleaned_str = raw_str.replace(';',',').replace(' and ', ',').replace('.', '')
+            parts = cleaned_str.split(',')
             for p in parts:
-                name = p.strip()
-                if len(name) > 1: # Avoid single chars
+                name = p.strip().title()
+                if len(name) > 1:
                     unique_authors.add(name)
         
         sorted_authors = sorted(list(unique_authors))
@@ -295,18 +297,27 @@ def main():
     if 'Status' in df.columns and sel_status: mask &= df['Status'].isin(sel_status)
     if 'Journal.Ranking' in df.columns and sel_rank: mask &= df['Journal.Ranking'].isin(sel_rank)
     
-    # Author Filter Logic (Contains Check)
+    # Author Filter Logic (Fuzzy Normalized Match)
     if auth_col and sel_auth:
         def has_selected_author(row_auth_str):
             if pd.isna(row_auth_str): return False
-            row_str_norm = str(row_auth_str).lower()
-            # If ANY selected author is found in the row's string, keep it.
-            return any(a.lower() in row_str_norm for a in sel_auth)
+            # Normalize row string same as we did for list
+            row_clean = str(row_auth_str).replace(';',',').replace(' and ', ',').replace('.', '').lower()
+            # Check if ANY selected author (normalized) exists in this row
+            for selected in sel_auth:
+                if selected.lower() in row_clean:
+                    return True
+            return False
             
         mask &= df[auth_col].apply(has_selected_author)
 
+    # CRITICAL FIX: DATE FILTER VISIBILITY
+    # If a paper has a missing date (NaT), normal comparison returns False (Hidden).
+    # We must explicitly INCLUDE NaT if the user hasn't narrowed the date range?
+    # Or simplified: Only filter if valid date exists.
     if date_col and 'date_range' in locals() and len(date_range) == 2:
-        mask &= (df[date_col].dt.date >= date_range[0]) & (df[date_col].dt.date <= date_range[1])
+        # Include if date is within range OR date is missing (keep missing data visible)
+        mask &= ((df[date_col].dt.date >= date_range[0]) & (df[date_col].dt.date <= date_range[1])) | df[date_col].isna()
     
     df_filtered = df.loc[mask]
     
@@ -322,10 +333,9 @@ def main():
     with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # CHANGED: Static Description instead of AI Summary
         st.markdown("""
         <div class="desc-box">
-            This section lists all publications related to KAESC in 2025.
+            This section lists all publications related to KAESC.
         </div>
         """, unsafe_allow_html=True)
         
@@ -365,11 +375,11 @@ def main():
             st.markdown("##### Journal Index Distribution")
             if 'Index' in df_filtered.columns and 'Journal' in df_filtered.columns:
                 idx_data = df_filtered.groupby(['Journal', 'Index']).size().reset_index(name='Count')
-                idx_data = idx_data.sort_values('Count', ascending=False).head(15)
+                idx_data = idx_data.sort_values('Count', ascending=False).head(25)
                 fig_idx = px.bar(idx_data, x='Journal', y='Count', color='Index', 
                                  title="",
                                  color_discrete_map={'ISI': '#002060', 'Emerging': '#C5AD68', 'No': '#999999'})
-                fig_idx.update_layout(height=400)
+                fig_idx.update_layout(height=500)
                 st.plotly_chart(fig_idx, use_container_width=True)
             else:
                 st.info("Column 'Index' not found for Journal Index Chart.")
