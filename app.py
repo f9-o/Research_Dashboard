@@ -52,22 +52,6 @@ st.markdown("""
         color: #002060;
         font-weight: 800;
     }
-    
-    /* Automated Insight Box */
-    .insight-box {
-        background-color: #f8f9fa;
-        border-left: 4px solid #002060;
-        padding: 15px;
-        border-radius: 4px;
-        margin-bottom: 20px;
-        font-size: 15px;
-        line-height: 1.6;
-        color: #444;
-    }
-    .insight-highlight {
-        color: #002060;
-        font-weight: bold;
-    }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
@@ -86,6 +70,25 @@ st.markdown("""
         border-bottom: 3px solid #002060;
         color: #002060;
     }
+    
+    /* Plotly Chart Background */
+    .js-plotly-plot .plotly .modebar {
+        orientation: v;
+        top: 0px;
+        right: -20px;
+    }
+    
+    /* Description Box */
+    .desc-box {
+        background-color: #f8f9fa;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 6px;
+        color: #555;
+        font-size: 14px;
+        text-align: center;
+        margin-bottom: 20px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,7 +103,6 @@ def load_data():
         files.extend(glob.glob(os.path.join("data", ext)))
     
     if not files:
-        # BUG FIXED: Returning 3 values to match unpacking expectation in main()
         return None, "No data file detected in 'data/' folder.", None
 
     file_path = files[0]
@@ -132,14 +134,16 @@ def load_data():
         if 'IF' in df.columns:
             df['IF'] = pd.to_numeric(df['IF'], errors='coerce').fillna(0.0)
             
-        text_cols = ['Status', 'Journal.Ranking', 'Authors', 'Journal', 'Type.of.study', 'PI']
+        text_cols = ['Status', 'Journal.Ranking', 'Authors', 'Journal', 'Type.of.study', 'PI', 'Index']
         for c in text_cols:
             if c in df.columns:
                 df[c] = df[c].astype(str).str.strip().replace(['nan', 'NaN', 'None', 'NA'], 'N/A')
-                if c != 'Journal.Ranking':
-                    df[c] = df[c].str.title()
-                else:
+                if c == 'Journal.Ranking':
                     df[c] = df[c].str.upper()
+                elif c == 'Index':
+                    df[c] = df[c].apply(lambda x: 'ISI' if x.upper() == 'ISI' else x.title())
+                else:
+                    df[c] = df[c].str.title()
 
         return df, None, date_col
         
@@ -177,39 +181,14 @@ def plot_gauge(value, target, title, suffix=""):
     fig.update_layout(height=180, margin=dict(t=30, r=30, l=30, b=10))
     return fig
 
-def generate_smart_insights(df, date_col, total_pubs, avg_if):
-    insights = []
-    
-    # Volume Insight
-    insights.append(f"We have processed <span class='insight-highlight'>{total_pubs}</span> research projects in FY2025.")
-    
-    # High Impact Insight
-    if 'Journal.Ranking' in df.columns:
-        q1_count = len(df[df['Journal.Ranking'] == 'Q1'])
-        insights.append(f"Quality is high, with <span class='insight-highlight'>{q1_count}</span> papers published in top-tier (Q1) journals.")
-        
-    # Top Author
-    auth_col = 'PI' if 'PI' in df.columns else ('Authors' if 'Authors' in df.columns else None)
-    if auth_col:
-        top_auth = df[auth_col].mode().iloc[0]
-        count = len(df[df[auth_col] == top_auth])
-        insights.append(f"The leading contributor is <span class='insight-highlight'>{top_auth}</span> with {count} active projects.")
-        
-    # Momentum (Month)
-    if date_col:
-        top_month_idx = df[date_col].dt.month.mode().iloc[0]
-        top_month_name = datetime(2025, top_month_idx, 1).strftime('%B')
-        insights.append(f"Output peaked in <span class='insight-highlight'>{top_month_name}</span>.")
-
-    return " ".join(insights)
-
 def plot_network_graph(df):
     if 'Authors' not in df.columns:
         return None
         
     G = nx.Graph()
     for authors_str in df['Authors'].dropna():
-        authors = [a.strip() for a in str(authors_str).split(',') if len(a) > 2]
+        # Clean naming for graph
+        authors = [a.strip() for a in str(authors_str).replace(';',',').split(',') if len(a.strip()) > 3]
         if len(authors) > 1:
             for u, v in itertools.combinations(authors, 2):
                 if G.has_edge(u, v): G[u][v]['weight'] += 1
@@ -255,13 +234,13 @@ def plot_network_graph(df):
 # 5. DASHBOARD UI
 # -----------------------------------------------------------------------------
 def main():
-    # HEADER (Strictly No Emojis, Clean Layout)
     c1, c2, c3 = st.columns([1, 8, 1])
     with c1:
         if os.path.exists("assets/logo_left.png"): st.image("assets/logo_left.png", use_container_width=True)
     with c2:
         st.markdown("<h1 style='text-align: center; margin:0;'>RESEARCH PERFORMANCE DASHBOARD</h1>", unsafe_allow_html=True)
-        st.markdown("<h4 style='text-align: center; color: #666; margin:0;'>Fiscal Year 2025 Executive Report</h4>", unsafe_allow_html=True)
+        # CHANGED: Header Title per request
+        st.markdown("<h4 style='text-align: center; color: #666; margin:0; letter-spacing: 1px;'>KAESC Publications 2025</h4>", unsafe_allow_html=True)
     with c3:
         if os.path.exists("assets/logo_right.png"): st.image("assets/logo_right.png", use_container_width=True)
             
@@ -271,7 +250,6 @@ def main():
     
     if df is None:
         st.error(error_msg)
-        # Added explicit return to prevent further execution
         return
 
     # SIDEBAR
@@ -282,7 +260,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown("### FILTER CONTROLS")
     
-    # UX: Date Range Picker (Advanced)
+    # Date Range Picker
     if date_col:
         min_date = df[date_col].min().date()
         max_date = df[date_col].max().date()
@@ -294,26 +272,46 @@ def main():
     rank_opts = sorted(df['Journal.Ranking'].unique()) if 'Journal.Ranking' in df.columns else []
     sel_rank = st.sidebar.multiselect("Journal Ranking", rank_opts, default=rank_opts)
     
-    pi_col = 'PI' if 'PI' in df.columns else ('Authors' if 'Authors' in df.columns else None)
-    sel_pi = []
-    if pi_col:
-        pi_opts = sorted(df[pi_col].unique())
-        sel_pi = st.sidebar.multiselect("Principal Investigator", pi_opts, default=[])
+    # IMPROVED AUTHOR FILTER:
+    # 1. Clean and split authors for the dropdown list to avoid messy strings.
+    auth_col = 'Authors' if 'Authors' in df.columns else None
+    sel_auth = []
+    if auth_col:
+        # Create a set of unique individual names
+        unique_authors = set()
+        for raw_str in df[auth_col].dropna().astype(str):
+            # Split by comma (and semicolon just in case)
+            parts = raw_str.replace(';',',').split(',')
+            for p in parts:
+                name = p.strip()
+                if len(name) > 1: # Avoid single chars
+                    unique_authors.add(name)
+        
+        sorted_authors = sorted(list(unique_authors))
+        sel_auth = st.sidebar.multiselect("Authors", sorted_authors, default=[])
 
     # FILTERING
     mask = pd.Series(True, index=df.index)
     if 'Status' in df.columns and sel_status: mask &= df['Status'].isin(sel_status)
     if 'Journal.Ranking' in df.columns and sel_rank: mask &= df['Journal.Ranking'].isin(sel_rank)
-    if pi_col and sel_pi: mask &= df[pi_col].isin(sel_pi)
     
-    # Date Filtering
+    # Author Filter Logic (Contains Check)
+    if auth_col and sel_auth:
+        def has_selected_author(row_auth_str):
+            if pd.isna(row_auth_str): return False
+            row_str_norm = str(row_auth_str).lower()
+            # If ANY selected author is found in the row's string, keep it.
+            return any(a.lower() in row_str_norm for a in sel_auth)
+            
+        mask &= df[auth_col].apply(has_selected_author)
+
     if date_col and 'date_range' in locals() and len(date_range) == 2:
         mask &= (df[date_col].dt.date >= date_range[0]) & (df[date_col].dt.date <= date_range[1])
     
     df_filtered = df.loc[mask]
     
     # -------------------------------------------------------------------------
-    # MAIN TABS (CLEAN TITLES)
+    # MAIN TABS
     # -------------------------------------------------------------------------
     tab1, tab2, tab3, tab4 = st.tabs(["EXECUTIVE OVERVIEW", "TRENDS & ANALYSIS", "COLLABORATION NET", "DATA REGISTRY"])
 
@@ -324,20 +322,17 @@ def main():
     with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 1. SMART INSIGHTS
-        total = len(df_filtered)
-        avg_if = df_filtered['IF'].mean() if 'IF' in df_filtered.columns and total > 0 else 0
-        
-        insight_text = generate_smart_insights(df_filtered, date_col, total, avg_if)
-        st.markdown(f"""
-        <div class="insight-box">
-            <strong>AI SUMMARY:</strong><br>
-            {insight_text}
+        # CHANGED: Static Description instead of AI Summary
+        st.markdown("""
+        <div class="desc-box">
+            This section lists all publications related to KAESC in 2025.
         </div>
         """, unsafe_allow_html=True)
         
-        # 2. GAUGES & METRICS
+        # 1. GAUGES & METRICS
+        total = len(df_filtered)
         if_sum = df_filtered['IF'].sum() if 'IF' in df_filtered.columns else 0
+        avg_if = df_filtered['IF'].mean() if 'IF' in df_filtered.columns and total > 0 else 0
         
         m1, m2, m3, m4 = st.columns(4)
         with m1: st.plotly_chart(plot_gauge(total, target_pubs, "Total Output"), use_container_width=True)
@@ -346,8 +341,14 @@ def main():
         with m3:
             st.metric("Avg Impact Factor", f"{avg_if:.2f}")
             st.markdown("<br>", unsafe_allow_html=True)
-            top_q = len(df_filtered[df_filtered['Journal.Ranking']=='Q1']) if 'Journal.Ranking' in df_filtered.columns else 0
-            st.metric("Q1 Papers", top_q)
+            if 'Journal.Ranking' in df_filtered.columns:
+                q_counts = df_filtered['Journal.Ranking'].value_counts()
+                q1 = q_counts.get('Q1', 0)
+                q2 = q_counts.get('Q2', 0)
+                q3 = q_counts.get('Q3', 0)
+                st.markdown(f"**Q1:** {q1} &nbsp;|&nbsp; **Q2:** {q2} &nbsp;|&nbsp; **Q3:** {q3}")
+            else:
+                st.metric("Q1 Papers", 0)
 
         with m4:
             acc_count = 0
@@ -359,24 +360,31 @@ def main():
         st.markdown("---")
         
         r1c1, r1c2 = st.columns([1, 1])
+        
         with r1c1:
-            st.markdown("##### Portfolio Composition")
-            if 'Status' in df_filtered.columns and 'Type.of.study' in df_filtered.columns:
-                sun_data = df_filtered.groupby(['Status', 'Type.of.study']).size().reset_index(name='Count')
-                fig_sun = px.sunburst(sun_data, path=['Status', 'Type.of.study'], values='Count', 
-                                      color='Status', color_discrete_sequence=[COLOR_NAVY, COLOR_GOLD, '#405887', '#998852'])
-                fig_sun.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=350)
-                st.plotly_chart(fig_sun, use_container_width=True)
+            st.markdown("##### Journal Index Distribution")
+            if 'Index' in df_filtered.columns and 'Journal' in df_filtered.columns:
+                idx_data = df_filtered.groupby(['Journal', 'Index']).size().reset_index(name='Count')
+                idx_data = idx_data.sort_values('Count', ascending=False).head(15)
+                fig_idx = px.bar(idx_data, x='Journal', y='Count', color='Index', 
+                                 title="",
+                                 color_discrete_map={'ISI': '#002060', 'Emerging': '#C5AD68', 'No': '#999999'})
+                fig_idx.update_layout(height=400)
+                st.plotly_chart(fig_idx, use_container_width=True)
+            else:
+                st.info("Column 'Index' not found for Journal Index Chart.")
         
         with r1c2:
-            st.markdown("##### Pipeline Progression")
-            if 'Status' in df_filtered.columns:
-                s_counts = df_filtered['Status'].value_counts().reset_index()
-                s_counts.columns = ['Status', 'Count']
-                fig_s = px.bar(s_counts, y='Status', x='Count', orientation='h', text='Count')
-                fig_s.update_traces(marker_color=COLOR_NAVY, textposition='outside')
-                fig_s.update_layout(yaxis={'categoryorder':'total ascending'}, height=350)
-                st.plotly_chart(fig_s, use_container_width=True)
+            st.markdown("##### Journal Ranking (Explicit Counts)")
+            if 'Journal.Ranking' in df_filtered.columns:
+                q_data = df_filtered['Journal.Ranking'].value_counts().reset_index()
+                q_data.columns = ['Rank', 'Count']
+                fig_q = px.pie(q_data, values='Count', names='Rank', hole=0.5,
+                               color='Rank',
+                               color_discrete_map={'Q1': '#002060', 'Q2': '#C5AD68', 'Q3': '#405887', 'Q4': '#999999'})
+                fig_q.update_traces(textinfo='label+value', textfont_size=16)
+                fig_q.update_layout(height=400, showlegend=True)
+                st.plotly_chart(fig_q, use_container_width=True)
 
     # --- TAB 2: TRENDS & ANALYSIS ---
     with tab2:
@@ -398,24 +406,13 @@ def main():
                 st.plotly_chart(fig_line, use_container_width=True)
                 
         with t_c2:
-            st.markdown("##### Impact Factor vs. Ranking")
-            if 'Journal.Ranking' in df_filtered.columns and 'IF' in df_filtered.columns:
-                fig_box = px.box(df_filtered, x='Journal.Ranking', y='IF', points="all", color='Journal.Ranking',
-                                 color_discrete_map={'Q1':COLOR_NAVY, 'Q2':COLOR_GOLD})
-                fig_box.update_layout(showlegend=False)
-                st.plotly_chart(fig_box, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("##### Leading Contributors (Volume vs Impact)")
-        if pi_col and 'IF' in df_filtered.columns:
-            df_auth = df_filtered.copy()
-            df_auth['Display_Author'] = df_auth[pi_col].apply(lambda x: (x[:20] + '...') if len(str(x)) > 20 else str(x))
-            auth_stats = df_auth.groupby('Display_Author').agg(Publications=(pi_col, 'count'), Total_IF=('IF', 'sum')).reset_index().sort_values('Publications', ascending=False).head(12)
-            fig_combo = go.Figure()
-            fig_combo.add_trace(go.Bar(x=auth_stats['Display_Author'], y=auth_stats['Publications'], name='Publications', marker_color=COLOR_NAVY))
-            fig_combo.add_trace(go.Scatter(x=auth_stats['Display_Author'], y=auth_stats['Total_IF'], name='Cum. IF', yaxis='y2', mode='lines+markers', line=dict(color=COLOR_GOLD, width=3)))
-            fig_combo.update_layout(yaxis=dict(showgrid=False), yaxis2=dict(overlaying='y', side='right', showgrid=False), legend=dict(orientation='h', y=1.1), height=500)
-            st.plotly_chart(fig_combo, use_container_width=True)
+            st.markdown("##### Portfolio Composition (Sunburst)")
+            if 'Status' in df_filtered.columns and 'Type.of.study' in df_filtered.columns:
+                sun_data = df_filtered.groupby(['Status', 'Type.of.study']).size().reset_index(name='Count')
+                fig_sun = px.sunburst(sun_data, path=['Status', 'Type.of.study'], values='Count', 
+                                      color='Status', color_discrete_sequence=[COLOR_NAVY, COLOR_GOLD, '#405887', '#998852'])
+                fig_sun.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=350)
+                st.plotly_chart(fig_sun, use_container_width=True)
 
     # --- TAB 3: COLLABORATION NETWORK ---
     with tab3:
@@ -435,12 +432,15 @@ def main():
                 df_filtered.to_excel(writer, index=False, sheet_name='2025_Data')
             st.download_button(label="Download Excel Report", data=buffer, file_name=f"Report_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.ms-excel", type="primary")
         
-        # UX: Interactive Table with Column Config
+        cols_to_show = [c for c in df_filtered.columns] 
+        if 'Index' in cols_to_show:
+            cols_to_show.insert(2, cols_to_show.pop(cols_to_show.index('Index')))
+            
         st.dataframe(
-            df_filtered, 
+            df_filtered[cols_to_show], 
             use_container_width=True,
             column_config={
-                "IF": st.column_config.ProgressColumn("Impact Factor", format="%.2f", min_value=0, max_value=df_filtered['IF'].max()),
+                "IF": st.column_config.ProgressColumn("Impact Factor", format="%.2f", min_value=0, max_value=df_filtered['IF'].max() if not df_filtered.empty else 1),
                 "Date": st.column_config.DateColumn("Publication Date")
             }
         )
